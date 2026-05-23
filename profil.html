@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REX DINER - Mon profil</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="js/supabase.js"></script>
+</head>
+<body>
+    <header class="commande-header">
+        <div class="header-top">
+            <div class="header-user">
+                <span>🦖 <a href="commander.html" style="color:#f5f0e8;text-decoration:none;">REX DINER</a></span>
+                <span class="header-badge">Mon profil</span>
+            </div>
+            <div class="header-actions">
+                <a href="commander.html" class="header-link">🛒 Commander</a>
+                <a href="historique.html" class="header-link">📋 Mes commandes</a>
+                <button onclick="logout()" class="header-link btn-logout">🚪 Déconnexion</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="profil-container">
+        <h1 class="page-title">👤 Mon profil</h1>
+
+        <div class="profil-card">
+            <div class="profil-avatar">
+                <span id="profil-initiales">🦖</span>
+            </div>
+
+            <form id="profil-form" class="profil-form">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="profil-email" disabled class="input-disabled">
+                    <p class="form-help">L'email ne peut pas être modifié. Contactez l'administrateur.</p>
+                </div>
+
+                <div class="form-group">
+                    <label>Prénom & Nom (principal) *</label>
+                    <input type="text" id="profil-prenom-nom" placeholder="Ex: Jean Dupont" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Téléphone (principal) *</label>
+                    <input type="tel" id="profil-telephone" placeholder="Ex: 0612345678" required>
+                </div>
+
+                <h3 style="color:#4ecdc4;margin-top:30px;">📞 Contacts supplémentaires</h3>
+                <p class="form-help">Autres personnes pouvant réceptionner les commandes.</p>
+
+                <div id="contacts-container"></div>
+
+                <button type="button" class="btn-ajouter-contact" id="btn-ajouter-contact">➕ Ajouter un contact</button>
+
+                <p id="profil-error" class="error-message"></p>
+                <p id="profil-success" class="success-message"></p>
+
+                <button type="submit" class="btn-auth" style="margin-top:20px;">💾 Enregistrer</button>
+            </form>
+        </div>
+
+        <div class="profil-reductions">
+            <h2>🎁 Mes réductions</h2>
+            <div id="reductions-liste">
+                <p class="loading">Chargement...</p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        function formatPrix(prix) { return '$' + parseFloat(prix).toFixed(2); }
+
+        async function requireAuth() {
+            var { data: { session } } = await supabase.auth.getSession();
+            if (!session) { window.location.href = 'index.html'; return null; }
+            var { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+            return { session, profile: profile || { role: 'client', contacts: [] } };
+        }
+
+        async function logout() { await supabase.auth.signOut(); window.location.href = 'index.html'; }
+
+        var userProfile = null;
+        var userSession = null;
+
+        async function init() {
+            var auth = await requireAuth();
+            if (!auth) return;
+            userSession = auth.session;
+            userProfile = auth.profile;
+            remplirFormulaire();
+            chargerReductions();
+        }
+
+        function remplirFormulaire() {
+            document.getElementById('profil-email').value = userSession.user.email;
+            document.getElementById('profil-prenom-nom').value = userProfile.prenom_nom || '';
+            document.getElementById('profil-telephone').value = userProfile.telephone || '';
+            
+            var initiales = (userProfile.prenom_nom || userSession.user.email)
+                .split(' ').map(function(w) { return w.charAt(0).toUpperCase(); }).slice(0, 2).join('');
+            document.getElementById('profil-initiales').textContent = initiales || '🦖';
+            
+            var contacts = userProfile.contacts || [];
+            if (typeof contacts === 'string') contacts = JSON.parse(contacts);
+            if (!Array.isArray(contacts)) contacts = [];
+            afficherContacts(contacts);
+        }
+
+        function afficherContacts(contacts) {
+            var container = document.getElementById('contacts-container');
+            container.innerHTML = '';
+            
+            if (contacts.length === 0) {
+                container.innerHTML = '<p style="color:#6a6a7a;text-align:center;">Aucun contact supplémentaire</p>';
+                return;
+            }
+            
+            contacts.forEach(function(contact, index) {
+                var div = document.createElement('div');
+                div.className = 'contact-row';
+                div.innerHTML = 
+                    '<div class="form-group" style="flex:1;">' +
+                    '<label>Prénom & Nom</label>' +
+                    '<input type="text" class="contact-nom" value="' + (contact.nom || '') + '" placeholder="Ex: Jean Dupont">' +
+                    '</div>' +
+                    '<div class="form-group" style="flex:1;">' +
+                    '<label>Téléphone</label>' +
+                    '<input type="tel" class="contact-tel" value="' + (contact.tel || '') + '" placeholder="Ex: 0612345678">' +
+                    '</div>' +
+                    '<button type="button" class="btn-supprimer-contact" onclick="supprimerContact(' + index + ')">🗑️</button>';
+                container.appendChild(div);
+            });
+        }
+
+        function supprimerContact(index) {
+            var contacts = userProfile.contacts || [];
+            if (typeof contacts === 'string') contacts = JSON.parse(contacts);
+            contacts.splice(index, 1);
+            userProfile.contacts = contacts;
+            afficherContacts(contacts);
+        }
+
+        document.getElementById('btn-ajouter-contact').addEventListener('click', function() {
+            var contacts = userProfile.contacts || [];
+            if (typeof contacts === 'string') contacts = JSON.parse(contacts);
+            if (!Array.isArray(contacts)) contacts = [];
+            contacts.push({ nom: '', tel: '' });
+            userProfile.contacts = contacts;
+            afficherContacts(contacts);
+        });
+
+        document.getElementById('profil-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            var prenomNom = document.getElementById('profil-prenom-nom').value.trim();
+            var telephone = document.getElementById('profil-telephone').value.trim();
+            
+            if (!prenomNom || !telephone) {
+                document.getElementById('profil-error').textContent = '❌ Prénom/Nom et Téléphone sont obligatoires';
+                return;
+            }
+            
+            var contacts = [];
+            document.querySelectorAll('.contact-row').forEach(function(row) {
+                var nom = row.querySelector('.contact-nom').value.trim();
+                var tel = row.querySelector('.contact-tel').value.trim();
+                if (nom || tel) {
+                    contacts.push({ nom: nom, tel: tel });
+                }
+            });
+            
+            var { error } = await supabase
+                .from('profiles')
+                .update({ 
+                    prenom_nom: prenomNom,
+                    telephone: telephone,
+                    contacts: contacts, 
+                    updated_at: new Date() 
+                })
+                .eq('id', userProfile.id);
+            
+            if (error) {
+                document.getElementById('profil-error').textContent = '❌ ' + error.message;
+                return;
+            }
+            
+            userProfile.prenom_nom = prenomNom;
+            userProfile.telephone = telephone;
+            userProfile.contacts = contacts;
+            
+            document.getElementById('profil-success').textContent = '✅ Profil enregistré !';
+            setTimeout(function() { document.getElementById('profil-success').textContent = ''; }, 3000);
+        });
+
+        async function chargerReductions() {
+            var { data: reductions } = await supabase
+                .from('reductions')
+                .select('*, produits(nom, prix_base)')
+                .eq('user_id', userProfile.id)
+                .eq('actif', true);
+            
+            var liste = document.getElementById('reductions-liste');
+            
+            if (!reductions || reductions.length === 0) {
+                liste.innerHTML = '<p class="aucune-commande">Aucune réduction active</p>';
+                return;
+            }
+            
+            var html = '<div class="reductions-grid">';
+            reductions.forEach(function(r) {
+                var description = r.type === 'prix_fixe' 
+                    ? formatPrix(r.prix_reduit) + ' (au lieu de ' + formatPrix(r.produits.prix_base) + ')'
+                    : '-' + r.pourcentage_reduction + '% (prix de base : ' + formatPrix(r.produits.prix_base) + ')';
+                
+                html += '<div class="reduction-card">' +
+                    '<div class="reduction-produit">' + (r.produits ? r.produits.nom : 'Produit inconnu') + '</div>' +
+                    '<div class="reduction-description">' + description + '</div>' +
+                    '</div>';
+            });
+            html += '</div>';
+            liste.innerHTML = html;
+        }
+
+        init();
+    </script>
+
+</body>
+</html>

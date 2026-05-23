@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REX DINER - Connexion</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0"></script>
+    <script src="js/supabase.js"></script>
+</head>
+<body class="auth-page">
+    <div class="auth-container">
+        <div class="auth-header">
+            <div class="dino-icon">🦖</div>
+            <h1 class="neon-text-small">REX DINER</h1>
+            <p class="subtitle-small">Open 24/7 - Connexion</p>
+        </div>
+
+        <form id="login-form" class="auth-form">
+            <h2>Connexion</h2>
+            <input type="email" id="login-email" placeholder="Email" required>
+            <input type="password" id="login-password" placeholder="Mot de passe" required>
+            <button type="submit" class="btn-auth">🦖 Se connecter</button>
+            <p id="login-error" class="error-message"></p>
+        </form>
+
+        <p class="auth-info">Pas encore de compte ? Contactez l'administrateur.</p>
+    </div>
+
+    <script src="js/supabase.js"></script>
+    <script>
+        // Vérifier si déjà connecté
+        async function checkSession() {
+            const { data: { session } } = await supabase.auth.getSession();
+            
+            if (session) {
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('role')
+                    .eq('id', session.user.id)
+                    .single();
+                
+                if (profile) {
+                    if (profile.role === 'admin') {
+                        window.location.href = 'admin/dashboard.html';
+                    } else {
+                        window.location.href = 'commander.html';
+                    }
+                }
+            }
+        }
+        
+        checkSession();
+
+        // Connexion
+        document.getElementById('login-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const email = document.getElementById('login-email').value.trim();
+            const password = document.getElementById('login-password').value;
+            const errorEl = document.getElementById('login-error');
+            
+            errorEl.textContent = '';
+            
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email: email,
+                password: password
+            });
+            
+            if (error) {
+                errorEl.textContent = '❌ Email ou mot de passe incorrect';
+                return;
+            }
+            
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('role')
+                .eq('id', data.user.id)
+                .single();
+            
+            if (profile && profile.role === 'admin') {
+                window.location.href = 'admin/dashboard.html';
+            } else {
+                window.location.href = 'commander.html';
+            }
+        });
+    </script>
+
+</body>
+</html>

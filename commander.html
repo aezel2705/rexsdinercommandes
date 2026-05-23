@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REX DINER - Commander</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="js/supabase.js"></script>
+</head>
+<body>
+    <!-- En-tête avec infos utilisateur -->
+    <header class="commande-header">
+        <div class="header-top">
+            <div class="header-user">
+                <span id="header-username">🦖 Chargement...</span>
+                <span class="header-badge" id="header-role"></span>
+            </div>
+            <div class="header-actions">
+                <a href="historique.html" class="header-link">📋 Mes commandes</a>
+                <a href="profil.html" class="header-link">👤 Profil</a>
+                <button onclick="logout()" class="header-link btn-logout">🚪 Déconnexion</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Barre du panier -->
+    <div class="panier-bar" id="panier-bar">
+        <button class="panier-toggle" id="panier-toggle">
+            🛒 Panier <span class="panier-compteur" id="panier-compteur">0</span>
+        </button>
+    </div>
+
+    <!-- Panier latéral -->
+    <div class="panier-overlay" id="panier-overlay"></div>
+    <aside class="panier-sidebar" id="panier-sidebar">
+        <div class="panier-header">
+            <h2>🦖 Ma commande</h2>
+            <button class="panier-fermer" id="panier-fermer">✕</button>
+        </div>
+        <div class="panier-liste" id="panier-liste">
+            <p class="panier-vide">Votre panier est vide</p>
+        </div>
+        <div class="panier-total" id="panier-total"></div>
+        
+        <!-- Formulaire commande -->
+        <form class="commande-form" id="commande-form">
+            <h3>Finaliser la commande</h3>
+            <input type="text" id="client-prenom-nom" placeholder="Prénom Nom" required>
+            <input type="tel" id="client-telephone" placeholder="Téléphone" required>
+            
+            <div class="form-group">
+                <label>📅 Date et heure de livraison souhaitée</label>
+                <input type="datetime-local" id="client-date-livraison">
+            </div>
+            
+            <div class="form-group">
+                <label>📝 Instructions particulières</label>
+                <textarea id="client-instructions" placeholder="Ex: Pas de sauce, allergie aux arachides..." rows="3" style="width:100%;padding:12px;border-radius:8px;border:2px solid #2a2a4e;background:#1a1a2e;color:#f5f0e8;font-size:1rem;resize:vertical;"></textarea>
+            </div>
+            
+            <button type="submit" class="btn-commander" id="btn-commander" disabled>
+                🦕 Commander
+            </button>
+        </form>
+    </aside>
+
+    <!-- Message de confirmation -->
+    <div class="confirmation-overlay" id="confirmation-overlay"></div>
+    <div class="confirmation-modal" id="confirmation-modal">
+        <div class="confirmation-content">
+            <div class="dino-icon">🦖</div>
+            <h2>Commande envoyée !</h2>
+            <p class="confirmation-numero">Votre commande : <span id="confirmation-numero"></span></p>
+            <p>Vous pouvez suivre son état dans "Mes commandes".</p>
+            <p class="confirmation-merci">Merci et à bientôt chez Rex Diner !</p>
+            <button class="btn-fermer" id="confirmation-fermer">OK</button>
+        </div>
+    </div>
+
+    <!-- Navigation catégories -->
+    <nav class="categories-nav" id="categories-nav"></nav>
+
+    <!-- Zone d'affichage des produits -->
+    <main class="produits-container" id="produits-container"></main>
+
+    <!-- Pied de page -->
+    <footer class="diner-footer">
+        <div class="checkerboard"></div>
+        <p>🍔 REX DINER - Open 24/7 - Depuis 1954 🍔</p>
+        <p class="footer-dinos">🦖 🦕 🦖 🦕 🦖</p>
+    </footer>
+
+    <script>
+        // ============================================
+        // FONCTIONS UTILITAIRES
+        // ============================================
+        function formatPrix(prix) {
+            return '$' + parseFloat(prix).toFixed(2);
+        }
+
+        async function requireAuth() {
+            var { data: { session } } = await supabase.auth.getSession();
+            if (!session) { window.location.href = 'index.html'; return null; }
+            
+            var { data: profile, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+            
+            if (error || !profile) {
+                var { data: newProfile } = await supabase.from('profiles').upsert({ id: session.user.id, role: 'client' }).select().single();
+                return { session, profile: newProfile || { role: 'client' } };
+            }
+            return { session, profile };
+        }
+
+        async function logout() { await supabase.auth.signOut(); window.location.href = 'index.html'; }
+
+        // ============================================
+        // VARIABLES
+        // ============================================
+        var panier = [];
+        var produits = [];
+        var categories = [];
+        var userProfile = null;
+        var userSession = null;
+
+        // ============================================
+        // INITIALISATION
+        // ============================================
+        async function init() {
+            var auth = await requireAuth();
+            if (!auth) return;
+            
+            userSession = auth.session;
+            userProfile = auth.profile;
+            
+            document.getElementById('header-username').textContent = '🦖 ' + (userProfile.prenom_nom || userSession.user.email);
+            
+            if (userProfile.role === 'admin') {
+    document.getElementById('header-role').textContent = 'Admin';
+    document.getElementById('header-role').className = 'header-badge admin-badge';
+    
+    // Vérifier si le lien existe déjà
+    if (!document.getElementById('admin-link')) {
+        var actionsDiv = document.querySelector('.header-actions');
+        var adminLink = document.createElement('a');
+        adminLink.id = 'admin-link';
+        adminLink.href = 'admin/dashboard.html';
+        adminLink.className = 'header-link';
+        adminLink.textContent = '⚙️ Admin';
+        adminLink.style.color = '#e63946';
+        actionsDiv.insertBefore(adminLink, actionsDiv.firstChild);
+    }
+}
+            
+            if (userProfile.prenom_nom) document.getElementById('client-prenom-nom').value = userProfile.prenom_nom;
+            if (userProfile.telephone) document.getElementById('client-telephone').value = userProfile.telephone;
+            
+            await chargerProduits();
+            afficherProduits();
+        }
+
+        // ============================================
+        // CHARGEMENT DES PRODUITS
+        // ============================================
+        async function chargerProduits() {
+            var { data: catData } = await supabase.from('categories').select('*').eq('actif', true).order('ordre');
+            categories = catData || [];
+            
+            var { data: prodData } = await supabase.from('produits').select('*').eq('actif', true).order('ordre');
+            
+            var { data: reductions } = await supabase.from('reductions').select('*').eq('user_id', userSession.user.id).eq('actif', true);
+            
+            var reductionsMap = {};
+            if (reductions) {
+                reductions.forEach(function(r) { reductionsMap[r.produit_id] = r; });
+            }
+            
+            produits = (prodData || []).map(function(p) {
+                var prix = parseFloat(p.prix_base);
+                var prixOriginal = prix;
+                var reductionTexte = '';
+                var reduc = reductionsMap[p.id];
+                
+                if (reduc) {
+                    if (reduc.type === 'prix_fixe' && reduc.prix_reduit < prix) {
+                        prix = parseFloat(reduc.prix_reduit);
+                        reductionTexte = ' (promo)';
+                    } else if (reduc.type === 'pourcentage') {
+                        var prixPct = prix * (1 - reduc.pourcentage_reduction / 100);
+                        if (prixPct < prix) { prix = prixPct; reductionTexte = ' (-' + reduc.pourcentage_reduction + '%)'; }
+                    }
+                }
+                
+                return {
+                    id: p.id, nom: p.nom, description: p.description, image: p.image,
+                    categorie_id: p.categorie_id, prix: prix, prix_original: prixOriginal,
+                    reduction_texte: reductionTexte, a_reduction: prix < prixOriginal
+                };
+            });
+        }
+
+        // ============================================
+        // AFFICHAGE DES PRODUITS
+        // ============================================
+        function afficherProduits() {
+            var nav = document.getElementById('categories-nav');
+            nav.innerHTML = '<button class="cat-btn active" data-categorie="toutes">🍽️ Tout</button>';
+            categories.forEach(function(cat) {
+                nav.innerHTML += '<button class="cat-btn" data-categorie="' + cat.id + '">' + (cat.icone || '') + ' ' + cat.nom + '</button>';
+            });
+            
+            var container = document.getElementById('produits-container');
+            container.innerHTML = '';
+            
+            categories.forEach(function(cat) {
+                var produitsCat = produits.filter(function(p) { return p.categorie_id === cat.id; });
+                if (produitsCat.length === 0) return;
+                
+                var html = '<section class="categorie-section" data-categorie="' + cat.id + '"><h2 class="categorie-titre">' + (cat.icone || '') + ' ' + cat.nom + '</h2><div class="produits-grid">';
+                
+                produitsCat.forEach(function(produit) {
+                    var imageHtml = produit.image ? '<div class="produit-image-container"><img src="' + produit.image + '" alt="' + produit.nom + '" class="produit-image"></div>' : '';
+                    var prixHtml = produit.a_reduction
+                        ? '<span class="produit-prix-original">' + formatPrix(produit.prix_original) + '</span> <span class="produit-prix produit-prix-reduit">' + formatPrix(produit.prix) + '</span><span class="produit-reduction-badge">' + produit.reduction_texte + '</span>'
+                        : '<span class="produit-prix">' + formatPrix(produit.prix) + '</span>';
+                    
+                    html += '<div class="produit-card"><div class="produit-content">' +
+                        '<h3 class="produit-nom">' + produit.nom + '</h3>' +
+                        '<p class="produit-description">' + (produit.description || '') + '</p>' +
+                        '<p class="produit-prix-container">' + prixHtml + '</p>' +
+                        '<div class="produit-actions">' +
+                        '<input type="number" class="input-qte" id="qte-' + produit.id + '" value="1" min="1" max="99">' +
+                        '<button class="btn-ajouter" data-id="' + produit.id + '">➕ Ajouter</button>' +
+                        '</div></div>' + imageHtml + '</div>';
+                });
+                
+                html += '</div></section>';
+                container.innerHTML += html;
+            });
+            
+            document.querySelectorAll('.btn-ajouter').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    var produitId = parseInt(this.getAttribute('data-id'));
+                    var qteInput = document.getElementById('qte-' + produitId);
+                    var quantite = parseInt(qteInput.value) || 1;
+                    ajouterAuPanier(produitId, quantite);
+                    qteInput.value = 1;
+                });
+            });
+            
+            document.getElementById('categories-nav').addEventListener('click', function(e) {
+                if (!e.target.classList.contains('cat-btn')) return;
+                document.querySelectorAll('.cat-btn').forEach(function(b) { b.classList.remove('active'); });
+                e.target.classList.add('active');
+                var catId = e.target.dataset.categorie;
+                document.querySelectorAll('.categorie-section').forEach(function(s) {
+                    s.style.display = (catId === 'toutes' || s.dataset.categorie === catId) ? 'block' : 'none';
+                });
+            });
+        }
+
+        // ============================================
+        // GESTION DU PANIER
+        // ============================================
+        function ajouterAuPanier(produitId, quantite) {
+            var produit = produits.find(function(p) { return p.id === produitId; });
+            if (!produit) return;
+            var existant = panier.find(function(item) { return item.id === produitId; });
+            if (existant) { existant.quantite += quantite; }
+            else { panier.push({ id: produitId, nom: produit.nom, prix: produit.prix, quantite: quantite }); }
+            mettreAJourPanier();
+        }
+
+        function retirerDuPanier(produitId) {
+            var index = panier.findIndex(function(item) { return item.id === produitId; });
+            if (index !== -1) {
+                if (panier[index].quantite > 1) { panier[index].quantite--; }
+                else { panier.splice(index, 1); }
+            }
+            mettreAJourPanier();
+        }
+
+        function viderPanier() {
+            panier = [];
+            mettreAJourPanier();
+            document.getElementById('panier-sidebar').classList.remove('open');
+            document.getElementById('panier-overlay').classList.remove('open');
+        }
+
+        function calculerTotal() {
+            return panier.reduce(function(total, item) { return total + (item.prix * item.quantite); }, 0);
+        }
+
+        function mettreAJourPanier() {
+            var compteur = document.getElementById('panier-compteur');
+            var liste = document.getElementById('panier-liste');
+            var totalEl = document.getElementById('panier-total');
+            var btnCommander = document.getElementById('btn-commander');
+            var nbArticles = panier.reduce(function(sum, item) { return sum + item.quantite; }, 0);
+            compteur.textContent = nbArticles;
+            
+            if (panier.length === 0) {
+                liste.innerHTML = '<p class="panier-vide">Votre panier est vide</p>';
+                totalEl.innerHTML = '';
+                btnCommander.disabled = true;
+            } else {
+                var html = '';
+                panier.forEach(function(item) {
+                    html += '<div class="panier-item"><div class="panier-item-info">' +
+                        '<span class="panier-item-nom">' + item.nom + '</span>' +
+                        '<span class="panier-item-prix">' + formatPrix(item.prix * item.quantite) + '</span></div>' +
+                        '<div class="panier-item-detail">' + formatPrix(item.prix) + ' × ' + item.quantite + '</div>' +
+                        '<div class="panier-item-actions">' +
+                        '<input type="number" class="input-qte-panier" value="' + item.quantite + '" min="1" max="99" data-id="' + item.id + '">' +
+                        '<button class="btn-qte btn-moins" data-id="' + item.id + '">−</button>' +
+                        '<button class="btn-qte btn-plus" data-id="' + item.id + '">+</button>' +
+                        '<button class="btn-qte btn-supprimer" data-id="' + item.id + '">🗑️</button>' +
+                        '</div></div>';
+                });
+                liste.innerHTML = html;
+                
+                liste.querySelectorAll('.input-qte-panier').forEach(function(input) {
+                    input.addEventListener('change', function() {
+                        var id = parseInt(this.dataset.id);
+                        var qte = parseInt(this.value) || 1;
+                        var item = panier.find(function(i) { return i.id === id; });
+                        if (item) { item.quantite = Math.max(1, Math.min(99, qte)); mettreAJourPanier(); }
+                    });
+                });
+                liste.querySelectorAll('.btn-plus').forEach(function(btn) {
+                    btn.addEventListener('click', function() { ajouterAuPanier(parseInt(this.dataset.id), 1); });
+                });
+                liste.querySelectorAll('.btn-moins').forEach(function(btn) {
+                    btn.addEventListener('click', function() { retirerDuPanier(parseInt(this.dataset.id)); });
+                });
+                liste.querySelectorAll('.btn-supprimer').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var id = parseInt(this.dataset.id);
+                        panier = panier.filter(function(i) { return i.id !== id; });
+                        mettreAJourPanier();
+                    });
+                });
+                
+                totalEl.innerHTML = '<div class="panier-total-ligne"><span>Total</span><span class="panier-total-prix">' + formatPrix(calculerTotal()) + '</span></div>';
+                btnCommander.disabled = false;
+            }
+        }
+
+        // ============================================
+        // OUVERTURE / FERMETURE PANIER
+        // ============================================
+        document.getElementById('panier-toggle').addEventListener('click', function() {
+            document.getElementById('panier-sidebar').classList.add('open');
+            document.getElementById('panier-overlay').classList.add('open');
+        });
+        document.getElementById('panier-fermer').addEventListener('click', function() {
+            document.getElementById('panier-sidebar').classList.remove('open');
+            document.getElementById('panier-overlay').classList.remove('open');
+        });
+        document.getElementById('panier-overlay').addEventListener('click', function() {
+            document.getElementById('panier-sidebar').classList.remove('open');
+            document.getElementById('panier-overlay').classList.remove('open');
+        });
+
+        // ============================================
+        // COMMANDE
+        // ============================================
+        document.getElementById('commande-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            var prenomNom = document.getElementById('client-prenom-nom').value.trim();
+            var telephone = document.getElementById('client-telephone').value.trim();
+            if (!prenomNom || !telephone) return;
+            if (panier.length === 0) return;
+            
+            var numero = '#' + Math.floor(Math.random() * 9000 + 1000);
+            var total = calculerTotal();
+            var dateLivraison = document.getElementById('client-date-livraison').value || '';
+            var instructions = document.getElementById('client-instructions').value.trim() || '';
+            
+            var { data: commande, error } = await supabase.from('commandes').insert({
+                user_id: userSession.user.id,
+                numero: numero,
+                statut: 'envoyee',
+                total: total,
+                prenom_nom: prenomNom,
+                telephone: telephone,
+                date_livraison: dateLivraison || null,
+                instructions: instructions || null
+            }).select().single();
+            
+            if (error) { alert('Erreur : ' + error.message); return; }
+            
+            var items = panier.map(function(item) {
+                return { commande_id: commande.id, produit_id: item.id, nom_produit: item.nom, quantite: item.quantite, prix_unitaire: item.prix, total_ligne: item.prix * item.quantite };
+            });
+            await supabase.from('commande_items').insert(items);
+            
+            // Envoyer vers Discord
+            if (userProfile.discord_webhook_url) {
+                var produitsTexte = '';
+                panier.forEach(function(item) { produitsTexte += '**' + item.quantite + 'x** ' + item.nom + ' — ' + formatPrix(item.prix * item.quantite) + '\n'; });
+                
+                var fields = [
+                    { name: '👤 Client', value: prenomNom, inline: true },
+                    { name: '📞 Téléphone', value: telephone, inline: true },
+                    { name: '📋 Numéro', value: numero, inline: true },
+                    { name: '📦 Produits commandés', value: produitsTexte || 'Aucun produit', inline: false },
+                    { name: '💰 Total', value: '**' + formatPrix(total) + '**', inline: false }
+                ];
+                
+                if (dateLivraison) fields.push({ name: '📅 Livraison souhaitée', value: dateLivraison.replace('T', ' à '), inline: false });
+                if (instructions) fields.push({ name: '📝 Instructions', value: instructions, inline: false });
+                
+                var embed = {
+                    title: '🦖 Nouvelle commande Rex Diner !',
+                    color: 0xd74c7b,
+                    timestamp: new Date().toISOString(),
+                    fields: fields,
+                    footer: { text: 'REX DINER - Open 24/7' }
+                };
+                
+                var body = {
+                    content: '<@&1498593742196838511>',
+                    embeds: [embed],
+                    allowed_mentions: { parse: ['roles'] }
+                };
+                
+                var url = userProfile.discord_webhook_url;
+                if (userProfile.discord_thread_id) url += '?thread_id=' + userProfile.discord_thread_id;
+                
+                try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+                catch (err) { console.error('Erreur Discord:', err); }
+            }
+            
+            document.getElementById('confirmation-numero').textContent = numero;
+            document.getElementById('confirmation-overlay').classList.add('open');
+            document.getElementById('confirmation-modal').classList.add('open');
+            
+            viderPanier();
+            document.getElementById('commande-form').reset();
+            if (userProfile.prenom_nom) document.getElementById('client-prenom-nom').value = userProfile.prenom_nom;
+            if (userProfile.telephone) document.getElementById('client-telephone').value = userProfile.telephone;
+        });
+
+        document.getElementById('confirmation-fermer').addEventListener('click', function() {
+            document.getElementById('confirmation-overlay').classList.remove('open');
+            document.getElementById('confirmation-modal').classList.remove('open');
+        });
+
+        // ============================================
+        // DÉMARRAGE
+        // ============================================
+        window.addEventListener('DOMContentLoaded', function() { setTimeout(init, 500); });
+    </script>
+</body>
+</html>

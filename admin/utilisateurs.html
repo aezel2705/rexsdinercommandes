@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REX DINER - Gestion Utilisateurs</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="js/supabase.js"></script>
+</head>
+<body>
+    <header class="commande-header admin-header">
+        <div class="header-top">
+            <div class="header-user">
+                <span>🦖 REX DINER</span>
+                <span class="header-badge admin-badge">Admin</span>
+            </div>
+            <div class="header-actions">
+                <a href="dashboard.html" class="header-link">📊 Dashboard</a>
+                <a href="produits.html" class="header-link">🍔 Produits</a>
+                <a href="utilisateurs.html" class="header-link active-link">👥 Utilisateurs</a>
+                <a href="../commander.html" class="header-link">🛒 Voir le site</a>
+                <button onclick="logout()" class="header-link btn-logout">🚪 Déconnexion</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="admin-container">
+        <div class="admin-section-header">
+            <h1 class="page-title">👥 Gestion des utilisateurs</h1>
+            <button class="btn-ajouter-produit" id="btn-ajouter-utilisateur">➕ Créer un utilisateur</button>
+        </div>
+
+        <div class="table-container">
+            <table class="admin-table">
+                <thead>
+                    <tr><th>Email</th><th>Nom</th><th>Rôle</th><th>Réductions</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="utilisateurs-liste">
+                    <tr><td colspan="5" class="loading">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- Modale utilisateur -->
+    <div class="detail-overlay" id="user-overlay"></div>
+    <div class="detail-modal" id="user-modal">
+        <div class="detail-header">
+            <h2 id="user-modal-titre">Créer un utilisateur</h2>
+            <button class="detail-fermer" id="user-modal-fermer">✕</button>
+        </div>
+        <form id="user-form" class="profil-form" novalidate>
+            <input type="hidden" id="user-id">
+            <div id="email-group" class="form-group"><label>Email *</label><input type="email" id="user-email" required></div>
+            <div id="password-group" class="form-group"><label>Mot de passe *</label><input type="password" id="user-password" minlength="6"></div>
+            <div class="form-group"><label>Prénom & Nom</label><input type="text" id="user-prenom-nom"></div>
+            <div class="form-group"><label>Téléphone</label><input type="tel" id="user-telephone"></div>
+            <div class="form-group"><label>Rôle</label><select id="user-role"><option value="client">Client</option><option value="admin">Admin</option></select></div>
+            <div class="form-group"><label>URL Webhook Discord</label><input type="text" id="user-discord-webhook"></div>
+            <div class="form-group"><label>ID Thread Discord</label><input type="text" id="user-discord-thread"></div>
+            
+            <div id="password-change-section" style="display:none; border-top:2px solid #2a2a4e; margin-top:15px; padding-top:15px;">
+                <h4 style="color:#d74c7b; margin-bottom:10px;">🔒 Changer le mot de passe</h4>
+                <div class="form-group">
+                    <label>Nouveau mot de passe</label>
+                    <input type="password" id="user-new-password" minlength="6" placeholder="Laissez vide pour ne pas changer">
+                </div>
+                <p class="form-help">Uniquement si vous voulez changer le mot de passe</p>
+            </div>
+            
+            <p id="user-error" class="error-message"></p>
+            <p id="user-success" class="success-message"></p>
+            <button type="submit" class="btn-auth">💾 Enregistrer</button>
+        </form>
+    </div>
+
+    <!-- Modale réductions -->
+    <div class="detail-overlay" id="reduc-overlay"></div>
+    <div class="detail-modal" id="reduc-modal">
+        <div class="detail-header">
+            <h2>🎁 Réductions</h2>
+            <button class="detail-fermer" id="reduc-modal-fermer">✕</button>
+        </div>
+        <div id="reduc-liste" style="max-height:300px;overflow-y:auto;margin-bottom:15px;"></div>
+        <form id="reduc-form" class="profil-form" style="border-top:2px solid #2a2a4e;padding-top:15px;">
+            <input type="hidden" id="reduc-user-id">
+            <div class="form-group"><label>Produit</label><select id="reduc-produit" required></select></div>
+            <div class="form-group"><label>Type</label><select id="reduc-type" required><option value="prix_fixe">Prix fixe ($)</option><option value="pourcentage">Pourcentage (%)</option></select></div>
+            <div class="form-group" id="reduc-prix-group"><label>Prix réduit ($)</label><input type="number" id="reduc-prix-fixe" step="0.01" min="0"></div>
+            <div class="form-group" id="reduc-pct-group" style="display:none;"><label>Pourcentage (-%)</label><input type="number" id="reduc-pourcentage" step="0.01" min="0" max="100"></div>
+            <button type="submit" class="btn-auth">💾 Ajouter la réduction</button>
+        </form>
+    </div>
+
+    <script>
+        var utilisateurs = [];
+        var tousProduits = [];
+
+        function formatPrix(prix) { return '$' + parseFloat(prix).toFixed(2); }
+        async function logout() { await supabase.auth.signOut(); window.location.href = '../index.html'; }
+
+        async function checkAdmin() {
+            var { data: { session } } = await supabase.auth.getSession();
+            if (!session) { window.location.href = '../index.html'; return false; }
+            var { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+            if (!profile || profile.role !== 'admin') { window.location.href = '../commander.html'; return false; }
+            return true;
+        }
+
+        async function chargerUtilisateurs() {
+            var { data: profiles } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+            utilisateurs = profiles || [];
+            afficherUtilisateurs();
+        }
+
+        async function chargerProduits() {
+            var { data: produits } = await window.supabaseClient
+                .from('produits')
+                .select('id, nom, prix_base, categories(nom)')
+                .eq('actif', true)
+                .order('categorie_id')
+                .order('nom');
+            
+            tousProduits = produits || [];
+            
+            var select = document.getElementById('reduc-produit');
+            select.innerHTML = '';
+            
+            var categories = {};
+            tousProduits.forEach(function(p) {
+                var catNom = p.categories ? p.categories.nom : 'Sans catégorie';
+                if (!categories[catNom]) categories[catNom] = [];
+                categories[catNom].push(p);
+            });
+            
+            Object.keys(categories).forEach(function(cat) {
+                var optgroup = document.createElement('optgroup');
+                optgroup.label = cat;
+                categories[cat].forEach(function(p) {
+                    var option = document.createElement('option');
+                    option.value = p.id;
+                    option.textContent = p.nom + ' (' + formatPrix(p.prix_base) + ')';
+                    optgroup.appendChild(option);
+                });
+                select.appendChild(optgroup);
+            });
+        }
+
+        function afficherUtilisateurs() {
+            var tbody = document.getElementById('utilisateurs-liste');
+            if (utilisateurs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#6a6a7a;">Aucun utilisateur</td></tr>';
+                return;
+            }
+            tbody.innerHTML = utilisateurs.map(function(u) {
+                var badge = u.role === 'admin' ? '<span class="commande-statut-badge statut-preparee">admin</span>' : '<span class="commande-statut-badge statut-prete">client</span>';
+                return '<tr>' +
+                    '<td>' + (u.email || 'N/A') + '</td>' +
+                    '<td>' + (u.prenom_nom || '—') + '</td>' +
+                    '<td>' + badge + '</td>' +
+                    '<td><button class="btn-detail" onclick="ouvrirReductions(\'' + u.id + '\')">🎁 Gérer</button></td>' +
+                    '<td><button class="btn-detail" onclick="ouvrirModaleUser(\'' + u.id + '\')">✏️</button></td>' +
+                    '</tr>';
+            }).join('');
+        }
+
+        // --- MODALE UTILISATEUR ---
+        document.getElementById('btn-ajouter-utilisateur').addEventListener('click', function() {
+            document.getElementById('user-id').value = '';
+            document.getElementById('user-email').value = '';
+            document.getElementById('user-password').value = '';
+            document.getElementById('user-password').required = true;
+            document.getElementById('user-new-password').value = '';
+            document.getElementById('user-prenom-nom').value = '';
+            document.getElementById('user-telephone').value = '';
+            document.getElementById('user-role').value = 'client';
+            document.getElementById('user-discord-webhook').value = '';
+            document.getElementById('user-discord-thread').value = '';
+            document.getElementById('user-error').textContent = '';
+            document.getElementById('user-success').textContent = '';
+            document.getElementById('user-modal-titre').textContent = '➕ Créer un utilisateur';
+            document.getElementById('email-group').style.display = 'block';
+            document.getElementById('password-group').style.display = 'block';
+            document.getElementById('password-change-section').style.display = 'none';
+            document.getElementById('user-overlay').classList.add('open');
+            document.getElementById('user-modal').classList.add('open');
+        });
+
+        function ouvrirModaleUser(id) {
+            var u = utilisateurs.find(function(x) { return x.id === id; });
+            if (!u) return;
+            document.getElementById('user-id').value = u.id;
+            document.getElementById('user-email').value = u.email || '';
+            document.getElementById('user-email').required = false;
+            document.getElementById('user-password').value = '';
+            document.getElementById('user-password').required = false;
+            document.getElementById('user-new-password').value = '';
+            document.getElementById('user-prenom-nom').value = u.prenom_nom || '';
+            document.getElementById('user-telephone').value = u.telephone || '';
+            document.getElementById('user-role').value = u.role;
+            document.getElementById('user-discord-webhook').value = u.discord_webhook_url || '';
+            document.getElementById('user-discord-thread').value = u.discord_thread_id || '';
+            document.getElementById('user-error').textContent = '';
+            document.getElementById('user-success').textContent = '';
+            document.getElementById('user-modal-titre').textContent = '✏️ Modifier : ' + (u.prenom_nom || u.email);
+            document.getElementById('email-group').style.display = 'none';
+            document.getElementById('password-group').style.display = 'none';
+            document.getElementById('password-change-section').style.display = 'block';
+            document.getElementById('user-overlay').classList.add('open');
+            document.getElementById('user-modal').classList.add('open');
+        }
+
+        document.getElementById('user-modal-fermer').addEventListener('click', function() {
+            document.getElementById('user-overlay').classList.remove('open');
+            document.getElementById('user-modal').classList.remove('open');
+        });
+
+        document.getElementById('user-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var id = document.getElementById('user-id').value;
+            var data = {
+                role: document.getElementById('user-role').value,
+                prenom_nom: document.getElementById('user-prenom-nom').value.trim() || null,
+                telephone: document.getElementById('user-telephone').value.trim() || null,
+                discord_webhook_url: document.getElementById('user-discord-webhook').value.trim() || null,
+                discord_thread_id: document.getElementById('user-discord-thread').value.trim() || null,
+                updated_at: new Date()
+            };
+            
+            if (id) {
+                // Modification
+                var { error } = await supabase.from('profiles').update(data).eq('id', id);
+                if (error) { document.getElementById('user-error').textContent = '❌ ' + error.message; return; }
+                
+                var newPassword = document.getElementById('user-new-password').value;
+                if (newPassword) {
+                    document.getElementById('user-error').textContent = '⚠️ Profil mis à jour. Le mot de passe doit être changé via le dashboard Supabase.';
+                }
+                document.getElementById('user-success').textContent = '✅ Mis à jour !';
+            } else {
+                // Création
+                var email = document.getElementById('user-email').value.trim();
+                var password = document.getElementById('user-password').value;
+                if (!email || !password) {
+                    document.getElementById('user-error').textContent = '❌ Email et mot de passe obligatoires';
+                    return;
+                }
+                var { data: signUp, error } = await supabase.auth.signUp({ email: email, password: password });
+                if (error) { document.getElementById('user-error').textContent = '❌ ' + error.message; return; }
+                if (signUp.user) {
+                    await new Promise(function(r) { setTimeout(r, 1000); });
+                    await supabase.from('profiles').upsert({ id: signUp.user.id, ...data });
+                }
+                document.getElementById('user-success').textContent = '✅ Utilisateur créé !';
+            }
+            setTimeout(function() {
+                document.getElementById('user-overlay').classList.remove('open');
+                document.getElementById('user-modal').classList.remove('open');
+                chargerUtilisateurs();
+            }, 1500);
+        });
+
+        // --- MODALE RÉDUCTIONS ---
+        async function ouvrirReductions(userId) {
+            document.getElementById('reduc-user-id').value = userId;
+            
+            var { data: reductions } = await supabase.from('reductions').select('*, produits(nom, prix_base)').eq('user_id', userId).eq('actif', true);
+            var liste = document.getElementById('reduc-liste');
+            
+            if (!reductions || reductions.length === 0) {
+                liste.innerHTML = '<p style="text-align:center;color:#6a6a7a;padding:20px;">Aucune réduction</p>';
+            } else {
+                liste.innerHTML = reductions.map(function(r) {
+                    var desc = r.type === 'prix_fixe' ? 'Prix fixe : ' + formatPrix(r.prix_reduit) : '-' + r.pourcentage_reduction + '%';
+                    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;margin-bottom:8px;">' +
+                        '<span>' + (r.produits ? r.produits.nom : 'Produit') + ' — ' + desc + '</span>' +
+                        '<button class="btn-detail" onclick="supprimerReduction(' + r.id + ')" style="background:#e63946;">🗑️</button>' +
+                        '</div>';
+                }).join('');
+            }
+            
+            document.getElementById('reduc-overlay').classList.add('open');
+            document.getElementById('reduc-modal').classList.add('open');
+        }
+
+        document.getElementById('reduc-modal-fermer').addEventListener('click', function() {
+            document.getElementById('reduc-overlay').classList.remove('open');
+            document.getElementById('reduc-modal').classList.remove('open');
+        });
+
+        document.getElementById('reduc-type').addEventListener('change', function() {
+            if (this.value === 'prix_fixe') {
+                document.getElementById('reduc-prix-group').style.display = 'block';
+                document.getElementById('reduc-pct-group').style.display = 'none';
+            } else {
+                document.getElementById('reduc-prix-group').style.display = 'none';
+                document.getElementById('reduc-pct-group').style.display = 'block';
+            }
+        });
+
+        document.getElementById('reduc-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var userId = document.getElementById('reduc-user-id').value;
+            var produitId = parseInt(document.getElementById('reduc-produit').value);
+            var type = document.getElementById('reduc-type').value;
+            
+            var data = { user_id: userId, produit_id: produitId, type: type, actif: true };
+            
+            if (type === 'prix_fixe') {
+                data.prix_reduit = parseFloat(document.getElementById('reduc-prix-fixe').value);
+            } else {
+                data.pourcentage_reduction = parseFloat(document.getElementById('reduc-pourcentage').value);
+            }
+            
+            var { error } = await supabase.from('reductions').insert(data);
+            if (error) { alert('Erreur : ' + error.message); return; }
+            
+            ouvrirReductions(userId);
+        });
+
+        async function supprimerReduction(reducId) {
+            await supabase.from('reductions').update({ actif: false }).eq('id', reducId);
+            var userId = document.getElementById('reduc-user-id').value;
+            ouvrirReductions(userId);
+        }
+
+        async function init() {
+            if (!await checkAdmin()) return;
+            await chargerProduits();
+            await chargerUtilisateurs();
+        }
+    </script>
+</body>
+</html>

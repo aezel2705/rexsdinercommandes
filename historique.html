@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REX DINER - Mes commandes</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="js/supabase.js"></script>
+</head>
+<body>
+    <header class="commande-header">
+        <div class="header-top">
+            <div class="header-user">
+                <span>🦖 <a href="commander.html" style="color:#f5f0e8;text-decoration:none;">REX DINER</a></span>
+                <span class="header-badge">Mes commandes</span>
+            </div>
+            <div class="header-actions">
+                <a href="commander.html" class="header-link">🛒 Commander</a>
+                <a href="profil.html" class="header-link">👤 Profil</a>
+                <button onclick="logout()" class="header-link btn-logout">🚪 Déconnexion</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="historique-container">
+        <h1 class="page-title">📋 Historique des commandes</h1>
+        
+        <div class="filtres">
+            <button class="filtre-btn active" data-filtre="toutes">Toutes</button>
+            <button class="filtre-btn" data-filtre="envoyee">📨 Envoyées</button>
+            <button class="filtre-btn" data-filtre="preparee">👨‍🍳 En préparation</button>
+            <button class="filtre-btn" data-filtre="prete">✅ Prêtes</button>
+            <button class="filtre-btn" data-filtre="livree">🚀 Livrées</button>
+        </div>
+
+        <div class="commandes-liste" id="commandes-liste">
+            <p class="loading">🦖 Chargement des commandes...</p>
+        </div>
+
+        <div class="detail-overlay" id="detail-overlay"></div>
+        <div class="detail-modal" id="detail-modal">
+            <div class="detail-header">
+                <h2 id="detail-numero">Commande #...</h2>
+                <button class="detail-fermer" id="detail-fermer">✕</button>
+            </div>
+            <div class="detail-statut" id="detail-statut"></div>
+            <div class="detail-items" id="detail-items"></div>
+            <div class="detail-total" id="detail-total"></div>
+            <div class="detail-date" id="detail-date"></div>
+        </div>
+    </main>
+
+    <script>
+        function formatPrix(prix) { return '$' + parseFloat(prix).toFixed(2); }
+
+        async function requireAuth() {
+            var { data: { session } } = await supabase.auth.getSession();
+            if (!session) { window.location.href = 'index.html'; return null; }
+            var { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+            return { session, profile: profile || { role: 'client' } };
+        }
+
+        async function logout() { await supabase.auth.signOut(); window.location.href = 'index.html'; }
+
+        function getStatutInfo(statut) {
+            var statuts = {
+                'envoyee': { icone: '📨', texte: 'Envoyée' },
+                'preparee': { icone: '👨‍🍳', texte: 'En préparation' },
+                'prete': { icone: '✅', texte: 'Prête' },
+                'livree': { icone: '🚀', texte: 'Livrée' },
+                'annulee': { icone: '❌', texte: 'Annulée' }
+            };
+            return statuts[statut] || { icone: '❓', texte: statut };
+        }
+
+        var commandes = [];
+        var userProfile = null;
+        var filtreActif = 'toutes';
+
+        async function init() {
+            var auth = await requireAuth();
+            if (!auth) return;
+            userProfile = auth.profile;
+            await chargerCommandes();
+            afficherCommandes();
+        }
+
+        async function chargerCommandes() {
+            var { data } = await supabase
+                .from('commandes')
+                .select('*')
+                .eq('user_id', userProfile.id)
+                .order('created_at', { ascending: false });
+            
+            commandes = data || [];
+        }
+
+        function afficherCommandes() {
+            var liste = document.getElementById('commandes-liste');
+            
+            var commandesFiltrees = commandes;
+            if (filtreActif !== 'toutes') {
+                commandesFiltrees = commandes.filter(function(c) { return c.statut === filtreActif; });
+            }
+            
+            if (commandesFiltrees.length === 0) {
+                liste.innerHTML = '<p class="aucune-commande">🦕 Aucune commande trouvée</p>';
+                return;
+            }
+            
+            var html = '';
+            commandesFiltrees.forEach(function(commande) {
+                var info = getStatutInfo(commande.statut);
+                var date = new Date(commande.created_at);
+                var dateFormatee = date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) + 
+                                   ' à ' + date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                
+                html += '<div class="commande-card" data-id="' + commande.id + '">' +
+                    '<div class="commande-card-header">' +
+                    '<span class="commande-numero">📋 ' + commande.numero + '</span>' +
+                    '<span class="commande-statut-badge statut-' + commande.statut + '">' + info.icone + ' ' + info.texte + '</span>' +
+                    '</div>' +
+                    '<div class="commande-card-body">' +
+                    '<p class="commande-total">💰 ' + formatPrix(commande.total) + '</p>' +
+                    '<p class="commande-date">📅 ' + dateFormatee + '</p>' +
+                    '</div>' +
+                    '<div class="commande-card-footer">' +
+                    '<button class="btn-detail" data-id="' + commande.id + '">🔍 Voir le détail</button>' +
+                    '</div>' +
+                    '</div>';
+            });
+            
+            liste.innerHTML = html;
+            
+            liste.querySelectorAll('.btn-detail').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    var commandeId = parseInt(this.dataset.id);
+                    afficherDetailCommande(commandeId);
+                });
+            });
+        }
+
+        async function afficherDetailCommande(commandeId) {
+            var commande = commandes.find(function(c) { return c.id === commandeId; });
+            if (!commande) return;
+            
+            var { data: items } = await supabase
+                .from('commande_items')
+                .select('*')
+                .eq('commande_id', commandeId);
+            
+            var info = getStatutInfo(commande.statut);
+            var date = new Date(commande.created_at);
+            var dateFormatee = date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) + 
+                               ' à ' + date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+            
+            document.getElementById('detail-numero').textContent = '📋 ' + commande.numero;
+            document.getElementById('detail-statut').innerHTML = '<span class="commande-statut-badge statut-' + commande.statut + '">' + info.icone + ' ' + info.texte + '</span>';
+            
+            var itemsHtml = '<table class="detail-table"><thead><tr><th>Produit</th><th>Qté</th><th>Prix unitaire</th><th>Total</th></tr></thead><tbody>';
+            if (items) {
+                items.forEach(function(item) {
+                    itemsHtml += '<tr>' +
+                        '<td>' + item.nom_produit + '</td>' +
+                        '<td>' + item.quantite + '</td>' +
+                        '<td>' + formatPrix(item.prix_unitaire) + '</td>' +
+                        '<td>' + formatPrix(item.total_ligne) + '</td>' +
+                        '</tr>';
+                });
+            }
+            itemsHtml += '</tbody></table>';
+            
+            document.getElementById('detail-items').innerHTML = itemsHtml;
+            document.getElementById('detail-total').innerHTML = '<strong>💰 Total : ' + formatPrix(commande.total) + '</strong>';
+            document.getElementById('detail-date').textContent = '📅 ' + dateFormatee;
+            
+            document.getElementById('detail-overlay').classList.add('open');
+            document.getElementById('detail-modal').classList.add('open');
+        }
+
+        document.getElementById('detail-fermer').addEventListener('click', function() {
+            document.getElementById('detail-overlay').classList.remove('open');
+            document.getElementById('detail-modal').classList.remove('open');
+        });
+
+        document.getElementById('detail-overlay').addEventListener('click', function() {
+            document.getElementById('detail-overlay').classList.remove('open');
+            document.getElementById('detail-modal').classList.remove('open');
+        });
+
+        document.querySelectorAll('.filtre-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.filtre-btn').forEach(function(b) { b.classList.remove('active'); });
+                this.classList.add('active');
+                filtreActif = this.dataset.filtre;
+                afficherCommandes();
+            });
+        });
+
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REX DINER - Admin Dashboard</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="js/supabase.js"></script>
+</head>
+<body>
+    <header class="commande-header admin-header">
+        <div class="header-top">
+            <div class="header-user">
+                <span>🦖 REX DINER</span>
+                <span class="header-badge admin-badge">Admin</span>
+            </div>
+            <div class="header-actions">
+                <a href="dashboard.html" class="header-link active-link">📊 Dashboard</a>
+                <a href="produits.html" class="header-link">🍔 Produits</a>
+                <a href="utilisateurs.html" class="header-link">👥 Utilisateurs</a>
+                <a href="../commander.html" class="header-link">🛒 Voir le site</a>
+                <button onclick="logout()" class="header-link btn-logout">🚪 Déconnexion</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="admin-container">
+        <h1 class="page-title">📊 Tableau de bord</h1>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon">📋</div>
+                <div class="stat-valeur" id="stat-commandes">-</div>
+                <div class="stat-label">Commandes aujourd'hui</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">⏳</div>
+                <div class="stat-valeur" id="stat-en-attente">-</div>
+                <div class="stat-label">En attente</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">👥</div>
+                <div class="stat-valeur" id="stat-utilisateurs">-</div>
+                <div class="stat-label">Utilisateurs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">💰</div>
+                <div class="stat-valeur" id="stat-chiffre">-</div>
+                <div class="stat-label">Chiffre aujourd'hui</div>
+            </div>
+        </div>
+
+        <div class="admin-section">
+            <h2>📋 Dernières commandes</h2>
+            <div class="table-container">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>N°</th>
+                            <th>Client</th>
+                            <th>Total</th>
+                            <th>Statut</th>
+                            <th>Date</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dernieres-commandes">
+                        <tr><td colspan="6" class="loading">Chargement...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        function formatPrix(prix) {
+            return '$' + parseFloat(prix).toFixed(2);
+        }
+
+        async function logout() {
+            await supabase.auth.signOut();
+            window.location.href = '../index.html';
+        }
+
+        function getStatutInfo(statut) {
+            var statuts = {
+                'envoyee': { texte: '📨 Envoyée' },
+                'preparee': { texte: '👨‍🍳 En prépa' },
+                'prete': { texte: '✅ Prête' },
+                'livree': { texte: '🚀 Livrée' },
+                'annulee': { texte: '❌ Annulée' }
+            };
+            return statuts[statut] || { texte: statut };
+        }
+
+        async function checkAdmin() {
+            var { data: { session } } = await supabase.auth.getSession();
+            if (!session) { window.location.href = '../index.html'; return false; }
+            
+            var { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+            if (!profile || profile.role !== 'admin') { window.location.href = '../commander.html'; return false; }
+            return true;
+        }
+
+        async function chargerStats() {
+            var aujourdhui = new Date();
+            aujourdhui.setHours(0, 0, 0, 0);
+            
+            var { data: commandesJour } = await supabase.from('commandes').select('*').gte('created_at', aujourdhui.toISOString());
+            var nbCommandes = commandesJour ? commandesJour.length : 0;
+            var enAttente = commandesJour ? commandesJour.filter(function(c) { return c.statut === 'envoyee' || c.statut === 'preparee'; }).length : 0;
+            var chiffre = commandesJour ? commandesJour.reduce(function(sum, c) { return sum + parseFloat(c.total); }, 0) : 0;
+            
+            var { count: nbUtilisateurs } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'client');
+            
+            document.getElementById('stat-commandes').textContent = nbCommandes;
+            document.getElementById('stat-en-attente').textContent = enAttente;
+            document.getElementById('stat-utilisateurs').textContent = nbUtilisateurs || 0;
+            document.getElementById('stat-chiffre').textContent = formatPrix(chiffre);
+        }
+
+        async function chargerDernieresCommandes() {
+            var { data: commandes } = await supabase.from('commandes').select('*').order('created_at', { ascending: false }).limit(20);
+            var tbody = document.getElementById('dernieres-commandes');
+            
+            if (!commandes || commandes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#6a6a7a;">Aucune commande</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = commandes.map(function(c) {
+                var date = new Date(c.created_at);
+                var dateFormatee = date.toLocaleDateString('fr-FR') + ' ' + date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                var info = getStatutInfo(c.statut);
+                
+                return '<tr>' +
+                    '<td>' + c.numero + '</td>' +
+                    '<td>' + (c.prenom_nom || 'N/A') + '</td>' +
+                    '<td>' + formatPrix(c.total) + '</td>' +
+                    '<td><span class="commande-statut-badge statut-' + c.statut + '">' + info.texte + '</span></td>' +
+                    '<td>' + dateFormatee + '</td>' +
+                    '<td><select class="statut-select" onchange="changerStatut(' + c.id + ', this.value)">' +
+                    '<option value="envoyee"' + (c.statut === 'envoyee' ? ' selected' : '') + '>Envoyée</option>' +
+                    '<option value="preparee"' + (c.statut === 'preparee' ? ' selected' : '') + '>En préparation</option>' +
+                    '<option value="prete"' + (c.statut === 'prete' ? ' selected' : '') + '>Prête</option>' +
+                    '<option value="livree"' + (c.statut === 'livree' ? ' selected' : '') + '>Livrée</option>' +
+                    '<option value="annulee"' + (c.statut === 'annulee' ? ' selected' : '') + '>Annulée</option>' +
+                    '</select></td></tr>';
+            }).join('');
+        }
+
+        async function changerStatut(commandeId, nouveauStatut) {
+            await supabase.from('commandes').update({ statut: nouveauStatut, updated_at: new Date() }).eq('id', commandeId);
+            await chargerStats();
+            await chargerDernieresCommandes();
+        }
+
+        async function init() {
+            var ok = await checkAdmin();
+            if (!ok) return;
+            await chargerStats();
+            await chargerDernieresCommandes();
+        }
+
+        init();
+    </script>
+    </body>
+</html>
