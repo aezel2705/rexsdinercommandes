@@ -6,7 +6,6 @@
     <title>REX DINER - Gestion Produits</title>
     <link rel="stylesheet" href="../css/style.css">
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-    <script src="../js/supabase.js"></script>
 </head>
 <body>
     <header class="commande-header admin-header">
@@ -201,5 +200,15 @@
             afficherProduits();
         }
     </script>
+    <script>
+    window.addEventListener('load', function() {
+        var script = document.createElement('script');
+        script.src = '../js/supabase.js';  // ou 'js/supabase.js' selon la page
+        document.body.appendChild(script);
+        script.onload = function() {
+            init();
+        };
+    });
+</script>
 </body>
 </html>
