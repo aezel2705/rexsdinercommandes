@@ -42,7 +42,6 @@
         </div>
         <div class="panier-total" id="panier-total"></div>
         
-        <!-- Formulaire commande -->
         <form class="commande-form" id="commande-form">
             <h3>Finaliser la commande</h3>
             <input type="text" id="client-prenom-nom" placeholder="Prénom Nom" required>
@@ -92,19 +91,22 @@
 
     <script>
         // ============================================
+        // CONFIG SUPABASE
+        // ============================================
+        const SUPABASE_URL = 'https://ztjqzohprboirwxzfbbn.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp0anF6b2hwcmJvaXJ3eHpmYmJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNjU2ODAsImV4cCI6MjA5NDk0MTY4MH0.vlg9v_a9_c4gzKOdhcUn0HSp3wBbFu5osyQC4fxevYM';
+        var supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // ============================================
         // FONCTIONS UTILITAIRES
         // ============================================
-        function formatPrix(prix) {
-            return '$' + parseFloat(prix).toFixed(2);
-        }
+        function formatPrix(prix) { return '$' + parseFloat(prix).toFixed(2); }
 
         async function requireAuth() {
             var { data: { session } } = await supabase.auth.getSession();
             if (!session) { window.location.href = 'index.html'; return null; }
-            
-            var { data: profile, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-            
-            if (error || !profile) {
+            var { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+            if (!profile) {
                 var { data: newProfile } = await supabase.from('profiles').upsert({ id: session.user.id, role: 'client' }).select().single();
                 return { session, profile: newProfile || { role: 'client' } };
             }
@@ -135,21 +137,19 @@
             document.getElementById('header-username').textContent = '🦖 ' + (userProfile.prenom_nom || userSession.user.email);
             
             if (userProfile.role === 'admin') {
-    document.getElementById('header-role').textContent = 'Admin';
-    document.getElementById('header-role').className = 'header-badge admin-badge';
-    
-    // Vérifier si le lien existe déjà
-    if (!document.getElementById('admin-link')) {
-        var actionsDiv = document.querySelector('.header-actions');
-        var adminLink = document.createElement('a');
-        adminLink.id = 'admin-link';
-        adminLink.href = 'admin/dashboard.html';
-        adminLink.className = 'header-link';
-        adminLink.textContent = '⚙️ Admin';
-        adminLink.style.color = '#e63946';
-        actionsDiv.insertBefore(adminLink, actionsDiv.firstChild);
-    }
-}
+                document.getElementById('header-role').textContent = 'Admin';
+                document.getElementById('header-role').className = 'header-badge admin-badge';
+                if (!document.getElementById('admin-link')) {
+                    var actionsDiv = document.querySelector('.header-actions');
+                    var adminLink = document.createElement('a');
+                    adminLink.id = 'admin-link';
+                    adminLink.href = 'admin/dashboard.html';
+                    adminLink.className = 'header-link';
+                    adminLink.textContent = '⚙️ Admin';
+                    adminLink.style.color = '#e63946';
+                    actionsDiv.insertBefore(adminLink, actionsDiv.firstChild);
+                }
+            }
             
             if (userProfile.prenom_nom) document.getElementById('client-prenom-nom').value = userProfile.prenom_nom;
             if (userProfile.telephone) document.getElementById('client-telephone').value = userProfile.telephone;
@@ -170,9 +170,7 @@
             var { data: reductions } = await supabase.from('reductions').select('*').eq('user_id', userSession.user.id).eq('actif', true);
             
             var reductionsMap = {};
-            if (reductions) {
-                reductions.forEach(function(r) { reductionsMap[r.produit_id] = r; });
-            }
+            if (reductions) reductions.forEach(function(r) { reductionsMap[r.produit_id] = r; });
             
             produits = (prodData || []).map(function(p) {
                 var prix = parseFloat(p.prix_base);
@@ -395,7 +393,6 @@
             });
             await supabase.from('commande_items').insert(items);
             
-            // Envoyer vers Discord
             if (userProfile.discord_webhook_url) {
                 var produitsTexte = '';
                 panier.forEach(function(item) { produitsTexte += '**' + item.quantite + 'x** ' + item.nom + ' — ' + formatPrix(item.prix * item.quantite) + '\n'; });
@@ -450,19 +447,9 @@
         // ============================================
         // DÉMARRAGE
         // ============================================
-        window.addEventListener('DOMContentLoaded', function() { setTimeout(init, 500); });
+        window.addEventListener('load', function() {
+            setTimeout(init, 300);
+        });
     </script>
-    <script>
-    window.addEventListener('load', function() {
-        var script = document.createElement('script');
-        script.src = '../js/supabase.js';  // ou 'js/supabase.js' selon la page
-        document.body.appendChild(script);
-        script.onload = function() {
-            window.addEventListener('load', function() {
-    setTimeout(init, 300);
-});
-        };
-    });
-</script>
 </body>
 </html>
