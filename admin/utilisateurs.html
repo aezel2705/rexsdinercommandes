@@ -74,14 +74,15 @@
         </form>
     </div>
 
-    <!-- Modale réductions -->
+    <!-- Modale réductions & exclusivités -->
     <div class="detail-overlay" id="reduc-overlay"></div>
     <div class="detail-modal" id="reduc-modal">
         <div class="detail-header">
-            <h2>🎁 Réductions</h2>
+            <h2>🎁 Réductions & Exclusivités</h2>
             <button class="detail-fermer" id="reduc-modal-fermer">✕</button>
         </div>
-        <div id="reduc-liste" style="max-height:300px;overflow-y:auto;margin-bottom:15px;"></div>
+        <div id="reduc-liste" style="max-height:200px;overflow-y:auto;margin-bottom:10px;"></div>
+        
         <form id="reduc-form" class="profil-form" style="border-top:2px solid #2a2a4e;padding-top:15px;">
             <input type="hidden" id="reduc-user-id">
             <div class="form-group"><label>Produit</label><select id="reduc-produit" required></select></div>
@@ -90,9 +91,19 @@
             <div class="form-group" id="reduc-pct-group" style="display:none;"><label>Pourcentage (-%)</label><input type="number" id="reduc-pourcentage" step="0.01" min="0" max="100"></div>
             <button type="submit" class="btn-auth">💾 Ajouter la réduction</button>
         </form>
+        
+        <form id="exclusif-form" class="profil-form" style="border-top:2px solid #d74c7b;padding-top:15px;margin-top:15px;">
+            <h4 style="color:#d74c7b;margin-bottom:10px;">🔒 Rendre un produit exclusif</h4>
+            <div class="form-group"><label>Produit</label><select id="exclusif-produit" required></select></div>
+            <button type="submit" class="btn-auth" style="background:#d74c7b;">🔒 Rendre exclusif</button>
+        </form>
     </div>
 
     <script>
+        const SUPABASE_URL = 'https://ztjqzohprboirwxzfbbn.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp0anF6b2hwcmJvaXJ3eHpmYmJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNjU2ODAsImV4cCI6MjA5NDk0MTY4MH0.vlg9v_a9_c4gzKOdhcUn0HSp3wBbFu5osyQC4fxevYM';
+        var supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
         var utilisateurs = [];
         var tousProduits = [];
 
@@ -114,7 +125,7 @@
         }
 
         async function chargerProduits() {
-            var { data: produits } = await window.supabaseClient
+            var { data: produits } = await supabase
                 .from('produits')
                 .select('id, nom, prix_base, categories(nom)')
                 .eq('actif', true)
@@ -122,10 +133,13 @@
                 .order('nom');
             
             tousProduits = produits || [];
+        }
+        
+        function remplirSelects() {
+            var selectReduc = document.getElementById('reduc-produit');
+            var selectEx = document.getElementById('exclusif-produit');
             
-            var select = document.getElementById('reduc-produit');
-            select.innerHTML = '';
-            
+            var html = '';
             var categories = {};
             tousProduits.forEach(function(p) {
                 var catNom = p.categories ? p.categories.nom : 'Sans catégorie';
@@ -134,16 +148,15 @@
             });
             
             Object.keys(categories).forEach(function(cat) {
-                var optgroup = document.createElement('optgroup');
-                optgroup.label = cat;
+                html += '<optgroup label="' + cat + '">';
                 categories[cat].forEach(function(p) {
-                    var option = document.createElement('option');
-                    option.value = p.id;
-                    option.textContent = p.nom + ' (' + formatPrix(p.prix_base) + ')';
-                    optgroup.appendChild(option);
+                    html += '<option value="' + p.id + '">' + p.nom + ' (' + formatPrix(p.prix_base) + ')</option>';
                 });
-                select.appendChild(optgroup);
+                html += '</optgroup>';
             });
+            
+            selectReduc.innerHTML = html;
+            selectEx.innerHTML = html;
         }
 
         function afficherUtilisateurs() {
@@ -228,17 +241,10 @@
             };
             
             if (id) {
-                // Modification
                 var { error } = await supabase.from('profiles').update(data).eq('id', id);
                 if (error) { document.getElementById('user-error').textContent = '❌ ' + error.message; return; }
-                
-                var newPassword = document.getElementById('user-new-password').value;
-                if (newPassword) {
-                    document.getElementById('user-error').textContent = '⚠️ Profil mis à jour. Le mot de passe doit être changé via le dashboard Supabase.';
-                }
                 document.getElementById('user-success').textContent = '✅ Mis à jour !';
             } else {
-                // Création
                 var email = document.getElementById('user-email').value.trim();
                 var password = document.getElementById('user-password').value;
                 if (!email || !password) {
@@ -260,24 +266,42 @@
             }, 1500);
         });
 
-        // --- MODALE RÉDUCTIONS ---
+        // --- MODALE RÉDUCTIONS & EXCLUSIVITÉS ---
         async function ouvrirReductions(userId) {
             document.getElementById('reduc-user-id').value = userId;
+            remplirSelects();
             
+            // Afficher les réductions
             var { data: reductions } = await supabase.from('reductions').select('*, produits(nom, prix_base)').eq('user_id', userId).eq('actif', true);
-            var liste = document.getElementById('reduc-liste');
+            var { data: exclusifs } = await supabase.from('produits_exclusifs').select('*, produits(nom)').eq('user_id', userId);
             
-            if (!reductions || reductions.length === 0) {
-                liste.innerHTML = '<p style="text-align:center;color:#6a6a7a;padding:20px;">Aucune réduction</p>';
-            } else {
-                liste.innerHTML = reductions.map(function(r) {
+            var liste = document.getElementById('reduc-liste');
+            var html = '';
+            
+            if (reductions && reductions.length > 0) {
+                html += '<h5 style="color:#4ecdc4;margin-bottom:8px;">🎁 Réductions</h5>';
+                reductions.forEach(function(r) {
                     var desc = r.type === 'prix_fixe' ? 'Prix fixe : ' + formatPrix(r.prix_reduit) : '-' + r.pourcentage_reduction + '%';
-                    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;margin-bottom:8px;">' +
+                    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#1a1a2e;border-radius:8px;margin-bottom:5px;">' +
                         '<span>' + (r.produits ? r.produits.nom : 'Produit') + ' — ' + desc + '</span>' +
                         '<button class="btn-detail" onclick="supprimerReduction(' + r.id + ')" style="background:#e63946;">🗑️</button>' +
                         '</div>';
-                }).join('');
+                });
             }
+            
+            if (exclusifs && exclusifs.length > 0) {
+                html += '<h5 style="color:#d74c7b;margin-top:10px;margin-bottom:8px;">🔒 Produits exclusifs</h5>';
+                exclusifs.forEach(function(ex) {
+                    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#1a1a2e;border-radius:8px;margin-bottom:5px;border-left:3px solid #d74c7b;">' +
+                        '<span>' + (ex.produits ? ex.produits.nom : 'Produit #' + ex.produit_id) + '</span>' +
+                        '<button class="btn-detail" onclick="supprimerExclusif(' + ex.id + ')" style="background:#e63946;">🗑️</button>' +
+                        '</div>';
+                });
+            }
+            
+            if (!html) html = '<p style="text-align:center;color:#6a6a7a;padding:20px;">Aucune réduction ni exclusivité</p>';
+            
+            liste.innerHTML = html;
             
             document.getElementById('reduc-overlay').classList.add('open');
             document.getElementById('reduc-modal').classList.add('open');
@@ -318,8 +342,28 @@
             ouvrirReductions(userId);
         });
 
+        document.getElementById('exclusif-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var userId = document.getElementById('reduc-user-id').value;
+            var produitId = parseInt(document.getElementById('exclusif-produit').value);
+            
+            var { error } = await supabase.from('produits_exclusifs').upsert({
+                user_id: userId,
+                produit_id: produitId
+            });
+            
+            if (error) { alert('Erreur : ' + error.message); return; }
+            ouvrirReductions(userId);
+        });
+
         async function supprimerReduction(reducId) {
             await supabase.from('reductions').update({ actif: false }).eq('id', reducId);
+            var userId = document.getElementById('reduc-user-id').value;
+            ouvrirReductions(userId);
+        }
+        
+        async function supprimerExclusif(exclusifId) {
+            await supabase.from('produits_exclusifs').delete().eq('id', exclusifId);
             var userId = document.getElementById('reduc-user-id').value;
             ouvrirReductions(userId);
         }
@@ -329,16 +373,10 @@
             await chargerProduits();
             await chargerUtilisateurs();
         }
+        
+        window.addEventListener('load', function() {
+            setTimeout(init, 300);
+        });
     </script>
-    <script>
-    window.addEventListener('load', function() {
-        var script = document.createElement('script');
-        script.src = '../js/supabase.js';  // ou 'js/supabase.js' selon la page
-        document.body.appendChild(script);
-        script.onload = function() {
-            init();
-        };
-    });
-</script>
 </body>
 </html>
