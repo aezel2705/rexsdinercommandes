@@ -458,7 +458,9 @@
         script.src = '../js/supabase.js';  // ou 'js/supabase.js' selon la page
         document.body.appendChild(script);
         script.onload = function() {
-            init();
+            window.addEventListener('load', function() {
+    setTimeout(init, 300);
+});
         };
     });
 </script>
