@@ -162,39 +162,62 @@
         // CHARGEMENT DES PRODUITS
         // ============================================
         async function chargerProduits() {
-            var { data: catData } = await supabase.from('categories').select('*').eq('actif', true).order('ordre');
-            categories = catData || [];
-            
-            var { data: prodData } = await supabase.from('produits').select('*').eq('actif', true).order('ordre');
-            
-            var { data: reductions } = await supabase.from('reductions').select('*').eq('user_id', userSession.user.id).eq('actif', true);
-            
-            var reductionsMap = {};
-            if (reductions) reductions.forEach(function(r) { reductionsMap[r.produit_id] = r; });
-            
-            produits = (prodData || []).map(function(p) {
-                var prix = parseFloat(p.prix_base);
-                var prixOriginal = prix;
-                var reductionTexte = '';
-                var reduc = reductionsMap[p.id];
-                
-                if (reduc) {
-                    if (reduc.type === 'prix_fixe' && reduc.prix_reduit < prix) {
-                        prix = parseFloat(reduc.prix_reduit);
-                        reductionTexte = ' (promo)';
-                    } else if (reduc.type === 'pourcentage') {
-                        var prixPct = prix * (1 - reduc.pourcentage_reduction / 100);
-                        if (prixPct < prix) { prix = prixPct; reductionTexte = ' (-' + reduc.pourcentage_reduction + '%)'; }
-                    }
-                }
-                
-                return {
-                    id: p.id, nom: p.nom, description: p.description, image: p.image,
-                    categorie_id: p.categorie_id, prix: prix, prix_original: prixOriginal,
-                    reduction_texte: reductionTexte, a_reduction: prix < prixOriginal
-                };
-            });
+    var { data: catData } = await supabase.from('categories').select('*').eq('actif', true).order('ordre');
+    categories = catData || [];
+    
+    // Charger les produits classiques (sans exclusivité) + les exclusifs de l'utilisateur
+    var { data: exclusifs } = await supabase
+        .from('produits_exclusifs')
+        .select('produit_id')
+        .eq('user_id', userSession.user.id);
+    
+    var exclusifIds = exclusifs ? exclusifs.map(function(e) { return e.produit_id; }) : [];
+    
+    // Charger TOUS les produits actifs
+    var { data: prodData } = await supabase.from('produits').select('*').eq('actif', true).order('ordre');
+    
+    // Filtrer : on garde les produits SANS exclusivité + ceux exclusifs à l'utilisateur
+    // Pour ça, on charge d'abord TOUS les IDs de produits exclusifs (tous utilisateurs confondus)
+    var { data: tousExclusifs } = await supabase.from('produits_exclusifs').select('produit_id');
+    var tousExclusifIds = tousExclusifs ? tousExclusifs.map(function(e) { return e.produit_id; }) : [];
+    
+    var produitsFiltres = (prodData || []).filter(function(p) {
+        // Si le produit n'est dans aucune exclusivité → visible par tous
+        if (tousExclusifIds.indexOf(p.id) === -1) return true;
+        // Si le produit est exclusif à l'utilisateur → visible
+        if (exclusifIds.indexOf(p.id) !== -1) return true;
+        // Sinon → caché
+        return false;
+    });
+    
+    var { data: reductions } = await supabase.from('reductions').select('*').eq('user_id', userSession.user.id).eq('actif', true);
+    
+    var reductionsMap = {};
+    if (reductions) reductions.forEach(function(r) { reductionsMap[r.produit_id] = r; });
+    
+    produits = produitsFiltres.map(function(p) {
+        var prix = parseFloat(p.prix_base);
+        var prixOriginal = prix;
+        var reductionTexte = '';
+        var reduc = reductionsMap[p.id];
+        
+        if (reduc) {
+            if (reduc.type === 'prix_fixe' && reduc.prix_reduit < prix) {
+                prix = parseFloat(reduc.prix_reduit);
+                reductionTexte = ' (promo)';
+            } else if (reduc.type === 'pourcentage') {
+                var prixPct = prix * (1 - reduc.pourcentage_reduction / 100);
+                if (prixPct < prix) { prix = prixPct; reductionTexte = ' (-' + reduc.pourcentage_reduction + '%)'; }
+            }
         }
+        
+        return {
+            id: p.id, nom: p.nom, description: p.description, image: p.image,
+            categorie_id: p.categorie_id, prix: prix, prix_original: prixOriginal,
+            reduction_texte: reductionTexte, a_reduction: prix < prixOriginal
+        };
+    });
+}
 
         // ============================================
         // AFFICHAGE DES PRODUITS
