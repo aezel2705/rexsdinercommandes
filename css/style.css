@@ -1334,8 +1334,7 @@ body {
 
 /* === NAVIGATION CATÉGORIES === */
 .categories-nav {
-    display: grid;
-    grid-template-columns: repeat(3, auto);
+    display: flex;
     flex-wrap: wrap;
     justify-content: center;
     gap: 12px;
@@ -1348,7 +1347,13 @@ body {
     box-shadow: 0 4px 20px rgba(0,0,0,0.5);
     margin-bottom: 30px;
 }
-
+@media (max-width: 900px) {
+    .categories-nav {
+        display: grid;
+        grid-template-columns: repeat(3, auto);
+        justify-content: center;
+    }
+}
 .cat-btn {
     background: #1a1a2e;
     color: #f5f0e8;
