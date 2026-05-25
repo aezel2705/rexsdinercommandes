@@ -2104,3 +2104,13 @@ body {
 
 .btn-detail { background: #d74c7b; color: #fff; border: none; padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 0.9rem; font-weight: bold; transition: all 0.3s; margin: 2px; }
 .btn-detail:hover { background: #e8658f; }
+
+@media (max-width: 600px) {
+    .panier-bar {
+        top: 60px;
+    }
+    
+    .categories-nav {
+        padding-top: 70px;
+    }
+}
