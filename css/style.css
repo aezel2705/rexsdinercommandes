@@ -1334,7 +1334,8 @@ body {
 
 /* === NAVIGATION CATÉGORIES === */
 .categories-nav {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(3, auto);
     flex-wrap: wrap;
     justify-content: center;
     gap: 12px;
@@ -2105,18 +2106,4 @@ body {
 .btn-detail { background: #d74c7b; color: #fff; border: none; padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 0.9rem; font-weight: bold; transition: all 0.3s; margin: 2px; }
 .btn-detail:hover { background: #e8658f; }
 
-@media (max-width: 768px) {
-    .panier-bar {
-        position: relative;
-        top: auto;
-        right: auto;
-        display: flex;
-        justify-content: center;
-        margin: 10px 0;
-        z-index: 50;
-    }
-    
-    .categories-nav {
-        padding-top: 10px;
-    }
-}
+
